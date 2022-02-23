@@ -55,8 +55,8 @@ x_test_() ->
           mk_action(100, 100, "setelement(1, file:read_file_info(\"/\"), bla). ")))].
 
 mk_tracer(RTP, Opts) ->
-    fun(Slave) ->
-        Res = redbug:start(RTP, [{target, Slave}, blocking]++Opts),
+    fun(Peer) ->
+        Res = redbug:start(RTP, [{target, Peer}, blocking]++Opts),
         receive {pid, P} -> P ! {res, Res} end
     end.
 
@@ -64,28 +64,53 @@ mk_action(PreTO, PostTO, Str) ->
     {done, {ok, Ts, 0}, []} = erl_scan:tokens([], Str, 0),
     {ok, Es} = erl_parse:parse_exprs(Ts),
     Bs = erl_eval:new_bindings(),
-    fun(Slave) ->
+    fun(Peer) ->
         timer:sleep(PreTO),
-        rpc:call(Slave, erl_eval, exprs, [Es, Bs]),
+        rpc:call(Peer, erl_eval, exprs, [Es, Bs]),
         timer:sleep(PostTO)
     end.
 
 runner(Tracer, Action) ->
     os:cmd("epmd -daemon"),
     [net_kernel:start([eunit_master, shortnames]) || node() =:= nonode@nohost],
-    Opts = [{kill_if_fail, true}, {monitor_master, true}, {boot_timeout, 5}],
-    SlaveName = eunit_inferior,
-    {ok, Slave} = ct_slave:start(SlaveName, Opts),
-    {Pid, _} = spawn_monitor(fun() -> Tracer(Slave) end),
-    Action(Slave),
-    stop_slave(Slave, SlaveName),
+    PeerName = eunit_inferior,
+    {ok, Peer, NodeName} = start_peer(PeerName),
+    {Pid, _} = spawn_monitor(fun() -> Tracer(NodeName) end),
+    Action(NodeName),
+    stop_peer(Peer, NodeName),
     Pid ! {pid, self()},
     receive {res, X} -> X after 1000 -> timeout end.
+    
 
--ifdef(OTP_RELEASE).
-stop_slave(Slave, _) -> {ok, Slave} = ct_slave:stop(Slave).
+-ifdef(use_peer).
+
+stop_peer(Peer, _PeerName) ->
+    ok = peer:stop(Peer).
+
+start_peer(PeerName) ->
+    Opts = #{name => PeerName, wait_boot => 5000},
+    peer:start_link(Opts).
+
+-elif(OTP_RELEASE).
+
+stop_peer(Slave, _) ->
+    {ok, Slave} = ct_slave:stop(Slave).
+
+start_peer(SlaveName)
+    Opts = [{kill_if_fail, true}, {monitor_master, true}, {boot_timeout, 5}],
+    {ok, NodeName} = ct_slave:start(SlaveName, Opts),
+    {ok, NodeName, NodeName}.
+
 -else.
-stop_slave(Slave, SlaveName) -> {ok, Slave} = ct_slave:stop(SlaveName).
+
+stop_peer(Slave, SlaveName) ->
+    {ok, Slave} = ct_slave:stop(SlaveName).
+
+start_peer(SlaveName) ->
+    Opts = [{kill_if_fail, true}, {monitor_master, true}, {boot_timeout, 5}],
+    {ok, NodeName} = ct_slave:start(SlaveName, Opts),
+    {ok, NodeName, NodeName}.
+
 -endif.
 
 %% mk_interpreted_fun(Str) ->

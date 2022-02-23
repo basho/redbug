@@ -540,25 +540,48 @@ netload0() ->
 
 netload1() ->
   [start_dist() || node() =:= nonode@nohost],
-  Opts = [{kill_if_fail, true}, {monitor_master, true}, {boot_timeout, 5}],
-  SlaveName = eunit_inferior,
-  {ok, Slave} = ct_slave:start(SlaveName, Opts),
-  ?assertMatch(ok, assert_load(Slave, redbug_dist_eunit)),
-  stop_slave(Slave, SlaveName).
+  PeerName = eunit_inferior,
+  {ok, Peer, NodeName} = start_peer(PeerName),
+  ?assertMatch(ok, assert_load(NodeName, redbug_dist_eunit)),
+  stop_peer(Peer, PeerName).
 
 netload2() ->
   [start_dist() || node() =:= nonode@nohost],
-  Opts = [{kill_if_fail, true}, {monitor_master, true}, {boot_timeout, 5}],
-  SlaveName = eunit_inferior,
-  {ok, Slave} = ct_slave:start(SlaveName, Opts),
+  PeerName = eunit_inferior,
+  {ok, Peer, NodeName} = start_peer(PeerName),
   Ebin = filename:dirname(code:which(redbug)),
   Test = re:replace(re:replace(Ebin, "default", "test"), "ebin", "test"),
   code:add_patha(unicode:characters_to_list(Test)),
-  ?assertMatch(ok, assert_load(Slave, redbug_dist_eunit)),
-  stop_slave(Slave, SlaveName).
+  ?assertMatch(ok, assert_load(NodeName, redbug_dist_eunit)),
+  stop_peer(Peer, PeerName).
 
--ifdef(OTP_RELEASE).
-stop_slave(Slave, _) -> {ok, Slave} = ct_slave:stop(Slave).
+-ifdef(use_peer).
+
+stop_peer(Peer, _PeerName) ->
+    ok = peer:stop(Peer).
+
+start_peer(PeerName) ->
+    Opts = #{name => PeerName, wait_boot => 5000},
+    peer:start_link(Opts).
+
+-elif(OTP_RELEASE).
+
+stop_peer(Slave, _) ->
+    {ok, Slave} = ct_slave:stop(Slave).
+
+start_peer(SlaveName)
+    Opts = [{kill_if_fail, true}, {monitor_master, true}, {boot_timeout, 5}],
+    {ok, NodeName} = ct_slave:start(SlaveName, Opts),
+    {ok, NodeName, NodeName}.
+
 -else.
-stop_slave(Slave, SlaveName) -> {ok, Slave} = ct_slave:stop(SlaveName).
+
+stop_peer(Slave, SlaveName) ->
+    {ok, Slave} = ct_slave:stop(SlaveName).
+
+start_peer(SlaveName) ->
+    Opts = [{kill_if_fail, true}, {monitor_master, true}, {boot_timeout, 5}],
+    {ok, NodeName} = ct_slave:start(SlaveName, Opts),
+    {ok, NodeName, NodeName}.
+
 -endif.
